@@ -8,51 +8,109 @@ app.use(cors());
 app.use(express.json());
 
 const API_KEY = process.env.YOUTUBE_API_KEY;
+const PORT = process.env.PORT || 10000;
 
-// Health check
+/* -------------------- HEALTH CHECK -------------------- */
 app.get("/", (req, res) => {
   res.json({ status: "YouTube Analyzer API running 🚀" });
 });
 
-// 🔹 Get channel metadata
-app.get("/api/channel/:channelId", async (req, res) => {
+/* -------------------- UTILS -------------------- */
+const extractQuery = (query) => {
+  if (query.includes("youtube.com")) {
+    const match = query.match(/@([a-zA-Z0-9_.-]+)/);
+    return match ? match[1] : query;
+  }
+  return query.replace("@", "");
+};
+
+/* -------------------- CHANNEL METADATA -------------------- */
+app.get("/api/channel", async (req, res) => {
   try {
-    const { channelId } = req.params;
+    const input = req.query.query;
+    if (!input) {
+      return res.status(400).json({ error: "query parameter is required" });
+    }
 
-    const url = `https://www.googleapis.com/youtube/v3/channels`;
-    const response = await axios.get(url, {
-      params: {
-        part: "snippet,statistics",
-        id: channelId,
-        key: API_KEY
+    const searchQuery = extractQuery(input);
+
+    // 1️⃣ Search channel
+    const searchRes = await axios.get(
+      "https://www.googleapis.com/youtube/v3/search",
+      {
+        params: {
+          part: "snippet",
+          q: searchQuery,
+          type: "channel",
+          maxResults: 1,
+          key: API_KEY
+        }
       }
-    });
+    );
 
-    if (!response.data.items.length) {
+    if (!searchRes.data.items.length) {
       return res.status(404).json({ error: "Channel not found" });
     }
 
-    const channel = response.data.items[0];
+    const channelId = searchRes.data.items[0].id.channelId;
+
+    // 2️⃣ Get channel details
+    const channelRes = await axios.get(
+      "https://www.googleapis.com/youtube/v3/channels",
+      {
+        params: {
+          part: "snippet,statistics,contentDetails",
+          id: channelId,
+          key: API_KEY
+        }
+      }
+    );
+
+    const channel = channelRes.data.items[0];
 
     res.json({
+      channelId,
       title: channel.snippet.title,
       description: channel.snippet.description,
       subscribers: channel.statistics.subscriberCount,
       views: channel.statistics.viewCount,
       videos: channel.statistics.videoCount,
-      thumbnail: channel.snippet.thumbnails.high.url
+      thumbnail: channel.snippet.thumbnails.high.url,
+      createdAt: channel.snippet.publishedAt
     });
+
   } catch (err) {
     res.status(500).json({ error: "Failed to fetch channel data" });
   }
 });
 
-// 🔹 Get latest videos metadata
-app.get("/api/videos/:channelId", async (req, res) => {
+/* -------------------- CHANNEL VIDEOS -------------------- */
+app.get("/api/videos", async (req, res) => {
   try {
-    const { channelId } = req.params;
+    const input = req.query.query;
+    if (!input) {
+      return res.status(400).json({ error: "query parameter is required" });
+    }
 
-    // 1. Get uploads playlist ID
+    const searchQuery = extractQuery(input);
+
+    // 1️⃣ Search channel
+    const searchRes = await axios.get(
+      "https://www.googleapis.com/youtube/v3/search",
+      {
+        params: {
+          part: "snippet",
+          q: searchQuery,
+          type: "channel",
+          maxResults: 1,
+          key: API_KEY
+        }
+      }
+    );
+
+    const channelId = searchRes.data.items[0].id.channelId;
+
+    // 2️⃣ Get uploads playlist
     const channelRes = await axios.get(
       "https://www.googleapis.com/youtube/v3/channels",
       {
@@ -67,8 +125,8 @@ app.get("/api/videos/:channelId", async (req, res) => {
     const uploadsPlaylist =
       channelRes.data.items[0].contentDetails.relatedPlaylists.uploads;
 
-    // 2. Get videos from playlist
-    const videosRes = await axios.get(
+    // 3️⃣ Get videos
+    const playlistRes = await axios.get(
       "https://www.googleapis.com/youtube/v3/playlistItems",
       {
         params: {
@@ -80,20 +138,21 @@ app.get("/api/videos/:channelId", async (req, res) => {
       }
     );
 
-    const videos = videosRes.data.items.map(v => ({
-      title: v.snippet.title,
+    const videos = playlistRes.data.items.map(v => ({
       videoId: v.snippet.resourceId.videoId,
+      title: v.snippet.title,
       publishedAt: v.snippet.publishedAt,
       thumbnail: v.snippet.thumbnails.medium.url
     }));
 
     res.json(videos);
+
   } catch (err) {
     res.status(500).json({ error: "Failed to fetch videos" });
   }
 });
 
-const PORT = process.env.PORT || 10000;
+/* -------------------- START SERVER -------------------- */
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
