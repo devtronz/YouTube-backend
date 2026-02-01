@@ -7,8 +7,8 @@ router.get("/videos", async (req, res) => {
   try {
     const { query } = req.query;
 
-    // 1️⃣ Get channel ID first
-    const channelRes = await axios.get(
+    // 1️⃣ Find channel ID
+    const channelSearch = await axios.get(
       "https://www.googleapis.com/youtube/v3/search",
       {
         params: {
@@ -22,14 +22,12 @@ router.get("/videos", async (req, res) => {
     );
 
     const channelId =
-      channelRes.data.items[0]?.snippet?.channelId;
+      channelSearch.data.items[0]?.snippet?.channelId;
 
-    if (!channelId) {
-      return res.status(404).json([]);
-    }
+    if (!channelId) return res.json([]);
 
     // 2️⃣ Get last 10 video IDs
-    const searchRes = await axios.get(
+    const search = await axios.get(
       "https://www.googleapis.com/youtube/v3/search",
       {
         params: {
@@ -43,12 +41,14 @@ router.get("/videos", async (req, res) => {
       }
     );
 
-    const videoIds = searchRes.data.items
+    const videoIds = search.data.items
       .map(v => v.id.videoId)
       .join(",");
 
-    // 3️⃣ Get video statistics
-    const statsRes = await axios.get(
+    if (!videoIds) return res.json([]);
+
+    // 3️⃣ Get statistics (THIS IS THE KEY PART)
+    const stats = await axios.get(
       "https://www.googleapis.com/youtube/v3/videos",
       {
         params: {
@@ -59,8 +59,8 @@ router.get("/videos", async (req, res) => {
       }
     );
 
-    // 4️⃣ Format response
-    const videos = statsRes.data.items.map(v => ({
+    // 4️⃣ Format data for frontend
+    const videos = stats.data.items.map(v => ({
       videoId: v.id,
       title: v.snippet.title,
       thumbnail: v.snippet.thumbnails.medium.url,
