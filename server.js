@@ -7,6 +7,8 @@ import videosRoute from "./routes/videos.js";
 
 dotenv.config();
 
+console.log("YT_API_KEY length:", process.env.YT_API_KEY?.length);
+
 const app = express();
 app.use(cors());
 app.use(express.json());
