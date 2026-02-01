@@ -2,13 +2,17 @@ import express from "express";
 import axios from "axios";
 
 const router = express.Router();
+const YT_KEY = process.env.YT_API_KEY;
 
 router.get("/videos", async (req, res) => {
   try {
-    const { query } = req.query;
+    const query = req.query.query;
+    if (!query) {
+      return res.status(400).json({ error: "Query is required" });
+    }
 
-    // 1️⃣ Find channel ID
-    const channelSearch = await axios.get(
+    // Get channel ID first
+    const searchRes = await axios.get(
       "https://www.googleapis.com/youtube/v3/search",
       {
         params: {
@@ -16,64 +20,65 @@ router.get("/videos", async (req, res) => {
           q: query,
           type: "channel",
           maxResults: 1,
-          key: process.env.YT_API_KEY
-        }
+          key: YT_KEY,
+        },
       }
     );
 
     const channelId =
-      channelSearch.data.items[0]?.snippet?.channelId;
+      searchRes.data.items?.[0]?.snippet?.channelId;
 
-    if (!channelId) return res.json([]);
+    if (!channelId) {
+      return res.json([]);
+    }
 
-    // 2️⃣ Get last 10 video IDs
-    const search = await axios.get(
+    // Get last 10 videos
+    const videosRes = await axios.get(
       "https://www.googleapis.com/youtube/v3/search",
       {
         params: {
           part: "snippet",
           channelId,
-          maxResults: 10,
           order: "date",
+          maxResults: 10,
           type: "video",
-          key: process.env.YT_API_KEY
-        }
+          key: YT_KEY,
+        },
       }
     );
 
-    const videoIds = search.data.items
-      .map(v => v.id.videoId)
+    const videoIds = videosRes.data.items
+      .map((v) => v.id.videoId)
       .join(",");
 
     if (!videoIds) return res.json([]);
 
-    // 3️⃣ Get statistics (THIS IS THE KEY PART)
-    const stats = await axios.get(
+    // Get video statistics
+    const statsRes = await axios.get(
       "https://www.googleapis.com/youtube/v3/videos",
       {
         params: {
-          part: "snippet,statistics",
+          part: "statistics,snippet",
           id: videoIds,
-          key: process.env.YT_API_KEY
-        }
+          key: YT_KEY,
+        },
       }
     );
 
-    // 4️⃣ Format data for frontend
-    const videos = stats.data.items.map(v => ({
+    const videos = statsRes.data.items.map((v) => ({
       videoId: v.id,
       title: v.snippet.title,
       thumbnail: v.snippet.thumbnails.medium.url,
+      views: v.statistics.viewCount || 0,
+      likes: v.statistics.likeCount || 0,
+      comments: v.statistics.commentCount || 0,
       publishedAt: v.snippet.publishedAt,
-      views: v.statistics.viewCount,
-      likes: v.statistics.likeCount,
-      comments: v.statistics.commentCount
     }));
 
     res.json(videos);
   } catch (err) {
-    console.error(err.message);
-    res.status(500).json([]);
+    console.error("VIDEOS ERROR:", err.response?.data || err.message);
+    res.status(500).json({ error: "Failed to fetch videos" });
   }
 });
 
