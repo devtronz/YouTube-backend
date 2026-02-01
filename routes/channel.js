@@ -3,10 +3,33 @@ import axios from "axios";
 
 const router = express.Router();
 
+/* -------- HELPER: CLEAN QUERY -------- */
+function normalizeQuery(input) {
+  if (!input) return "";
+
+  // Handle full URL
+  if (input.includes("youtube.com")) {
+    const handleMatch = input.match(/@([a-zA-Z0-9._-]+)/);
+    if (handleMatch) return handleMatch[1];
+
+    const idMatch = input.match(/channel\/([a-zA-Z0-9_-]+)/);
+    if (idMatch) return idMatch[1];
+  }
+
+  // Remove @ if present
+  return input.replace("@", "").trim();
+}
+
 router.get("/channel", async (req, res) => {
   try {
-    const { query } = req.query;
+    const rawQuery = req.query.query;
+    const query = normalizeQuery(rawQuery);
 
+    if (!query) {
+      return res.status(400).json({ error: "Invalid query" });
+    }
+
+    // 1️⃣ Search channel
     const search = await axios.get(
       "https://www.googleapis.com/youtube/v3/search",
       {
@@ -20,10 +43,14 @@ router.get("/channel", async (req, res) => {
       }
     );
 
-    const channelId = search.data.items[0]?.id?.channelId;
-    if (!channelId) return res.status(404).json({});
+    if (!search.data.items.length) {
+      return res.status(404).json({ error: "Channel not found" });
+    }
 
-    const channel = await axios.get(
+    const channelId = search.data.items[0].id.channelId;
+
+    // 2️⃣ Get channel details
+    const channelRes = await axios.get(
       "https://www.googleapis.com/youtube/v3/channels",
       {
         params: {
@@ -34,7 +61,7 @@ router.get("/channel", async (req, res) => {
       }
     );
 
-    const c = channel.data.items[0];
+    const c = channelRes.data.items[0];
 
     res.json({
       channelId,
@@ -46,8 +73,8 @@ router.get("/channel", async (req, res) => {
       videos: c.statistics.videoCount
     });
   } catch (err) {
-    console.error(err.message);
-    res.status(500).json({});
+    console.error("CHANNEL ERROR:", err.response?.data || err.message);
+    res.status(500).json({ error: "YouTube API error" });
   }
 });
 
